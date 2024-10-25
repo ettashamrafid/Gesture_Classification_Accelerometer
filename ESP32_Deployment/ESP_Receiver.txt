@@ -1,0 +1,95 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Arduino.h>
+
+// Structure to receive data
+typedef struct struct_message {
+  float X_rms;
+  float X_std;
+  float Y_min;
+  float Y_max;
+  float Y_range;
+  float Y_rms;
+  float Y_std;
+  float Z_min;
+  float Z_max;
+  float Z_range;
+  float Z_rms;
+  float Z_std;
+  float X_jerk_rms;
+  float X_jerk_std;
+  float Y_jerk_min;
+  float Y_jerk_max;
+  float Y_jerk_range;
+  float Y_jerk_rms;
+  float Y_jerk_std;
+  float Z_jerk_min;
+  float Z_jerk_max;
+  float Z_jerk_range;
+  float Z_jerk_rms;
+  float Z_jerk_std;
+  float total_jerk_min;
+  float total_jerk_max;
+  float total_jerk_range;
+  float total_jerk_rms;
+  float total_jerk_std;
+} struct_message;
+
+// Create a struct_message instance to hold the received data
+struct_message myData;
+
+// Callback function that will be called when data is received
+void OnDataReceived(const esp_now_recv_info* info, const uint8_t* data, int len) {
+  memcpy(&myData, data, sizeof(myData)); // Copy the received data into myData
+
+  // Print received data to Serial Monitor
+  Serial.print("Received data: ");
+  Serial.print("X RMS: "); Serial.print(myData.X_rms);
+  Serial.print(", X Std: "); Serial.print(myData.X_std);
+  Serial.print(", Y Min: "); Serial.print(myData.Y_min);
+  Serial.print(", Y Max: "); Serial.print(myData.Y_max);
+  Serial.print(", Y Range: "); Serial.print(myData.Y_range);
+  Serial.print(", Y RMS: "); Serial.print(myData.Y_rms);
+  Serial.print(", Y Std: "); Serial.print(myData.Y_std);
+  Serial.print(", Z Min: "); Serial.print(myData.Z_min);
+  Serial.print(", Z Max: "); Serial.print(myData.Z_max);
+  Serial.print(", Z Range: "); Serial.print(myData.Z_range);
+  Serial.print(", Z RMS: "); Serial.print(myData.Z_rms);
+  Serial.print(", Z Std: "); Serial.print(myData.Z_std);
+  Serial.print(", X Jerk RMS: "); Serial.print(myData.X_jerk_rms);
+  Serial.print(", X Jerk Std: "); Serial.print(myData.X_jerk_std);
+  Serial.print(", Y Jerk Min: "); Serial.print(myData.Y_jerk_min);
+  Serial.print(", Y Jerk Max: "); Serial.print(myData.Y_jerk_max);
+  Serial.print(", Y Jerk Range: "); Serial.print(myData.Y_jerk_range);
+  Serial.print(", Y Jerk RMS: "); Serial.print(myData.Y_jerk_rms);
+  Serial.print(", Y Jerk Std: "); Serial.print(myData.Y_jerk_std);
+  Serial.print(", Z Jerk Min: "); Serial.print(myData.Z_jerk_min);
+  Serial.print(", Z Jerk Max: "); Serial.print(myData.Z_jerk_max);
+  Serial.print(", Z Jerk Range: "); Serial.print(myData.Z_jerk_range);
+  Serial.print(", Z Jerk RMS: "); Serial.print(myData.Z_jerk_rms);
+  Serial.print(", Z Jerk Std: "); Serial.print(myData.Z_jerk_std);
+  Serial.print(", Total Jerk Min: "); Serial.print(myData.total_jerk_min);
+  Serial.print(", Total Jerk Max: "); Serial.print(myData.total_jerk_max);
+  Serial.print(", Total Jerk Range: "); Serial.print(myData.total_jerk_range);
+  Serial.print(", Total Jerk RMS: "); Serial.print(myData.total_jerk_rms);
+  Serial.print(", Total Jerk Std: "); Serial.println(myData.total_jerk_std);
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+
+  // Initialize ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Register the callback function for receiving data
+  esp_now_register_recv_cb(OnDataReceived);
+}
+
+void loop() {
+  // Main loop can be used for other tasks or to manage received data
+  delay(10); // Adjust delay as needed
+}
