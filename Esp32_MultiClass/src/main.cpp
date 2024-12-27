@@ -1,5 +1,8 @@
 #include <Arduino.h>
 #include "NeuralNetwork.h"
+#include <esp_system.h>
+#include <esp_heap_caps.h>
+#include <stdio.h>
 
 // ADXL335 pins (connect to appropriate ADC pins on the ESP32)
 const int X_PIN = A0;
@@ -66,8 +69,16 @@ struct_message myData;
 NeuralNetwork *nn;
 
 void setup() {
-  Serial.begin(115200);
+Serial.begin(115200);
   nn = new NeuralNetwork();
+  
+  if (psramFound()) {
+    Serial.println("PSRAM is enabled and available!");
+    printf("Total PSRAM: %d bytes\n", esp_spiram_get_size());
+    // printf("Free PSRAM: %d bytes\n", esp_spiram_get_free_size());
+  } else {
+    Serial.println("PSRAM not found.");
+  }
 }
 
 float butterworth_filter(float input, float* x_history, float* y_history) {

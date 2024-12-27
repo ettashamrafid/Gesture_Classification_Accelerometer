@@ -1,0 +1,237 @@
+#include <Arduino.h>
+#include <math.h>
+#include <numeric>
+
+// ADXL335 pins (connect to appropriate ADC pins on the ESP32)
+const int X_PIN = A0;
+const int Y_PIN = A3;
+const int Z_PIN = A6;
+
+// Filter coefficients for a 4th-order Butterworth low-pass filter
+const float b[] = {0.00482434, 0.01929737, 0.02894606, 0.01929737, 0.00482434};
+const float a[] = {1.0, -2.36951, 2.31399, -1.05467, 0.18738};
+
+// Array to hold the last 200 samples for each axis
+const int WINDOW_SIZE = 200;
+float x_history[WINDOW_SIZE] = {0.0};
+float y_history[WINDOW_SIZE] = {0.0};
+float z_history[WINDOW_SIZE] = {0.0};
+float jerk_x_history[WINDOW_SIZE] = {0.0};
+float jerk_y_history[WINDOW_SIZE] = {0.0};
+float jerk_z_history[WINDOW_SIZE] = {0.0};
+float total_jerk_history[WINDOW_SIZE] = {0.0};
+
+int history_index = 0;
+
+// Variables for calculating jerk
+float last_x_filtered = 0.0;
+float last_y_filtered = 0.0;
+float last_z_filtered = 0.0;
+
+// Structure to send data
+typedef struct struct_message {
+  float X_rms;
+  float X_std;
+  float Y_min;
+  float Y_max;
+  float Y_range;
+  float Y_rms;
+  float Y_std;
+  float Z_min;
+  float Z_max;
+  float Z_range;
+  float Z_rms;
+  float Z_std;
+  float X_jerk_rms;
+  float X_jerk_std;
+  float Y_jerk_min;
+  float Y_jerk_max;
+  float Y_jerk_range;
+  float Y_jerk_rms;
+  float Y_jerk_std;
+  float Z_jerk_min;
+  float Z_jerk_max;
+  float Z_jerk_range;
+  float Z_jerk_rms;
+  float Z_jerk_std;
+  float total_jerk_min;
+  float total_jerk_max;
+  float total_jerk_range;
+  float total_jerk_rms;
+  float total_jerk_std;
+} struct_message;
+
+struct_message myData;
+
+
+void setup() {
+    Serial.begin(115200);
+}
+
+float butterworth_filter(float input, float* x_history, float* y_history) {
+  // Shift history array for new input
+  for (int i = 4; i > 0; i--) {
+    x_history[i] = x_history[i - 1];
+    y_history[i] = y_history[i - 1];
+  }
+  x_history[0] = input;
+
+  // Compute new output
+  float output = 0.0;
+  for (int i = 0; i < 5; i++) {
+    output += b[i] * x_history[i];
+  }
+  for (int i = 1; i < 5; i++) {
+    output -= a[i] * y_history[i];
+  }
+  
+  y_history[0] = output;
+
+  return output;
+}
+
+void update_statistics() {
+  // Update the history arrays
+  x_history[history_index] = last_x_filtered;
+  y_history[history_index] = last_y_filtered;
+  z_history[history_index] = last_z_filtered;
+
+  // Calculate jerk for each axis
+  jerk_x_history[history_index] = (last_x_filtered - x_history[(history_index - 1 + WINDOW_SIZE) % WINDOW_SIZE]) / 0.011;
+  jerk_y_history[history_index] = (last_y_filtered - y_history[(history_index - 1 + WINDOW_SIZE) % WINDOW_SIZE]) / 0.011;
+  jerk_z_history[history_index] = (last_z_filtered - z_history[(history_index - 1 + WINDOW_SIZE) % WINDOW_SIZE]) / 0.011;
+  
+  // Total jerk
+  float total_jerk = fabs(jerk_x_history[history_index]) + fabs(jerk_y_history[history_index]) + fabs(jerk_z_history[history_index]);
+  total_jerk_history[history_index] = total_jerk;
+
+  // Update index
+  history_index = (history_index + 1) % WINDOW_SIZE;
+
+  // Store min, max, mean, std dev and RMS for X, Y, Z and jerk
+  myData.Y_min = *std::min_element(y_history, y_history + WINDOW_SIZE);
+  myData.Y_max = *std::max_element(y_history, y_history + WINDOW_SIZE);
+  myData.Y_range = myData.Y_max - myData.Y_min;
+  myData.Y_rms = sqrt(std::accumulate(y_history, y_history + WINDOW_SIZE, 0.0, [](float acc, float y) { return acc + y * y; }) / WINDOW_SIZE);
+  myData.Y_std = sqrt(std::accumulate(y_history, y_history + WINDOW_SIZE, 0.0, [mean_y = (std::accumulate(y_history, y_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float y) { return acc + (y - mean_y) * (y - mean_y); }) / WINDOW_SIZE);
+
+  myData.Z_min = *std::min_element(z_history, z_history + WINDOW_SIZE);
+  myData.Z_max = *std::max_element(z_history, z_history + WINDOW_SIZE);
+  myData.Z_range = myData.Z_max - myData.Z_min;
+  myData.Z_rms = sqrt(std::accumulate(z_history, z_history + WINDOW_SIZE, 0.0, [](float acc, float z) { return acc + z * z; }) / WINDOW_SIZE);
+  myData.Z_std = sqrt(std::accumulate(z_history, z_history + WINDOW_SIZE, 0.0, [mean_z = (std::accumulate(z_history, z_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float z) { return acc + (z - mean_z) * (z - mean_z); }) / WINDOW_SIZE);
+
+  myData.X_rms = sqrt(std::accumulate(x_history, x_history + WINDOW_SIZE, 0.0, [](float acc, float x) { return acc + x * x; }) / WINDOW_SIZE);
+  myData.X_std = sqrt(std::accumulate(x_history, x_history + WINDOW_SIZE, 0.0, [mean_x = (std::accumulate(x_history, x_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float x) { return acc + (x - mean_x) * (x - mean_x); }) / WINDOW_SIZE);
+
+  myData.X_jerk_rms = sqrt(std::accumulate(jerk_x_history, jerk_x_history + WINDOW_SIZE, 0.0, [](float acc, float jerk_x) { return acc + jerk_x * jerk_x; }) / WINDOW_SIZE);
+  myData.X_jerk_std = sqrt(std::accumulate(jerk_x_history, jerk_x_history + WINDOW_SIZE, 0.0, [mean_jerk_x = (std::accumulate(jerk_x_history, jerk_x_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float jerk_x) { return acc + (jerk_x - mean_jerk_x) * (jerk_x - mean_jerk_x); }) / WINDOW_SIZE);
+
+  myData.Y_jerk_min = *std::min_element(jerk_y_history, jerk_y_history + WINDOW_SIZE);
+  myData.Y_jerk_max = *std::max_element(jerk_y_history, jerk_y_history + WINDOW_SIZE);
+  myData.Y_jerk_range = myData.Y_jerk_max - myData.Y_jerk_min;
+  myData.Y_jerk_rms = sqrt(std::accumulate(jerk_y_history, jerk_y_history + WINDOW_SIZE, 0.0, [](float acc, float jerk_y) { return acc + jerk_y * jerk_y; }) / WINDOW_SIZE);
+  myData.Y_jerk_std = sqrt(std::accumulate(jerk_y_history, jerk_y_history + WINDOW_SIZE, 0.0, [mean_jerk_y = (std::accumulate(jerk_y_history, jerk_y_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float jerk_y) { return acc + (jerk_y - mean_jerk_y) * (jerk_y - mean_jerk_y); }) / WINDOW_SIZE);
+
+  myData.Z_jerk_min = *std::min_element(jerk_z_history, jerk_z_history + WINDOW_SIZE);
+  myData.Z_jerk_max = *std::max_element(jerk_z_history, jerk_z_history + WINDOW_SIZE);
+  myData.Z_jerk_range = myData.Z_jerk_max - myData.Z_jerk_min;
+  myData.Z_jerk_rms = sqrt(std::accumulate(jerk_z_history, jerk_z_history + WINDOW_SIZE, 0.0, [](float acc, float jerk_z) { return acc + jerk_z * jerk_z; }) / WINDOW_SIZE);
+  myData.Z_jerk_std = sqrt(std::accumulate(jerk_z_history, jerk_z_history + WINDOW_SIZE, 0.0, [mean_jerk_z = (std::accumulate(jerk_z_history, jerk_z_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float jerk_z) { return acc + (jerk_z - mean_jerk_z) * (jerk_z - mean_jerk_z); }) / WINDOW_SIZE);
+
+  myData.total_jerk_min = *std::min_element(total_jerk_history, total_jerk_history + WINDOW_SIZE);
+  myData.total_jerk_max = *std::max_element(total_jerk_history, total_jerk_history + WINDOW_SIZE);
+  myData.total_jerk_range = myData.total_jerk_max - myData.total_jerk_min;
+  myData.total_jerk_rms = sqrt(std::accumulate(total_jerk_history, total_jerk_history + WINDOW_SIZE, 0.0, [](float acc, float total_jerk) { return acc + total_jerk * total_jerk; }) / WINDOW_SIZE);
+  myData.total_jerk_std = sqrt(std::accumulate(total_jerk_history, total_jerk_history + WINDOW_SIZE, 0.0, [mean_total_jerk = (std::accumulate(total_jerk_history, total_jerk_history + WINDOW_SIZE, 0.0) / WINDOW_SIZE)](float acc, float total_jerk) { return acc + (total_jerk - mean_total_jerk) * (total_jerk - mean_total_jerk); }) / WINDOW_SIZE);
+}
+
+void loop() {
+  // Read the analog values from the ADXL335 pins
+  int x_raw = analogRead(X_PIN);
+  int y_raw = analogRead(Y_PIN);
+  int z_raw = analogRead(Z_PIN);
+
+  // Convert the raw values to acceleration values (in g)
+  float x_g = (x_raw - 2048.0) / 2048.0 * 3.3;
+  float y_g = (y_raw - 2048.0) / 2048.0 * 3.3;
+  float z_g = (z_raw - 2048.0) / 2048.0 * 3.3;
+
+  // Apply the Butterworth filter to each axis
+  last_x_filtered = butterworth_filter(x_g, x_history, y_history);
+  last_y_filtered = butterworth_filter(y_g, x_history, y_history);
+  last_z_filtered = butterworth_filter(z_g, x_history, y_history);
+
+  // Update statistical features
+  update_statistics();
+
+  Serial.print("X RMS: ");
+  Serial.print(myData.X_rms);
+  Serial.print(", X Std: ");
+  Serial.print(myData.X_std);
+  
+  Serial.print(", Y Min: ");
+  Serial.print(myData.Y_min);
+  Serial.print(", Y Max: ");
+  Serial.print(myData.Y_max);
+  Serial.print(", Y Range: ");
+  Serial.print(myData.Y_range);
+  Serial.print(", Y RMS: ");
+  Serial.print(myData.Y_rms);
+  Serial.print(", Y Std: ");
+  Serial.print(myData.Y_std);
+  
+  Serial.print(", Z Min: ");
+  Serial.print(myData.Z_min);
+  Serial.print(", Z Max: ");
+  Serial.print(myData.Z_max);
+  Serial.print(", Z Range: ");
+  Serial.print(myData.Z_range);
+  Serial.print(", Z RMS: ");
+  Serial.print(myData.Z_rms);
+  Serial.print(", Z Std: ");
+  Serial.print(myData.Z_std);
+  
+  Serial.print(", X Jerk RMS: ");
+  Serial.print(myData.X_jerk_rms);
+  Serial.print(", X Jerk Std: ");
+  Serial.print(myData.X_jerk_std);
+  
+  Serial.print(", Y Jerk Min: ");
+  Serial.print(myData.Y_jerk_min);
+  Serial.print(", Y Jerk Max: ");
+  Serial.print(myData.Y_jerk_max);
+  Serial.print(", Y Jerk Range: ");
+  Serial.print(myData.Y_jerk_range);
+  Serial.print(", Y Jerk RMS: ");
+  Serial.print(myData.Y_jerk_rms);
+  Serial.print(", Y Jerk Std: ");
+  Serial.print(myData.Y_jerk_std);
+  
+  Serial.print(", Z Jerk Min: ");
+  Serial.print(myData.Z_jerk_min);
+  Serial.print(", Z Jerk Max: ");
+  Serial.print(myData.Z_jerk_max);
+  Serial.print(", Z Jerk Range: ");
+  Serial.print(myData.Z_jerk_range);
+  Serial.print(", Z Jerk RMS: ");
+  Serial.print(myData.Z_jerk_rms);
+  Serial.print(", Z Jerk Std: ");
+  Serial.print(myData.Z_jerk_std);
+  
+  Serial.print(", Total Jerk Min: ");
+  Serial.print(myData.total_jerk_min);
+  Serial.print(", Total Jerk Max: ");
+  Serial.print(myData.total_jerk_max);
+  Serial.print(", Total Jerk Range: ");
+  Serial.print(myData.total_jerk_range);
+  Serial.print(", Total Jerk RMS: ");
+  Serial.print(myData.total_jerk_rms);
+  Serial.print(", Total Jerk Std: ");
+  Serial.println(myData.total_jerk_std);
+
+  // Delay to control the frequency of data collection and sending
+  delay(10);  // Adjust this delay as per your requirements (currently set to 100ms)
+}
+
+// Add other necessary functions or main declarations if needed

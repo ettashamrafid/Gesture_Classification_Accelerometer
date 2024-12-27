@@ -6,6 +6,7 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/version.h"
 
+
 const int kArenaSize = 20000;
 alignas(16) uint8_t tensor_arena[kArenaSize];
 
